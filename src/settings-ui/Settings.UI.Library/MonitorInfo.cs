@@ -30,6 +30,7 @@ namespace Microsoft.PowerToys.Settings.UI.Library
         private bool _enableRotation;
         private bool _enableColorTemperature;
         private bool _enablePowerState;
+        private List<VcpValueBlock> _disabledVcpValues = new();
         private System.DateTime? _lastSeenUtc;
         private string _capabilitiesRaw = string.Empty;
         private List<VcpCodeDisplayInfo> _vcpCodesFormatted = new List<VcpCodeDisplayInfo>();
@@ -51,7 +52,7 @@ namespace Microsoft.PowerToys.Settings.UI.Library
 
         /// <summary>
         /// Invalidates the color preset cache and notifies property changes.
-        /// Call this when VcpCodesFormatted or SupportsColorTemperature changes.
+        /// Call this when capabilities, monitor identity, or VCP value restrictions change.
         /// </summary>
         private void InvalidateColorPresetCache()
         {
@@ -149,6 +150,7 @@ namespace Microsoft.PowerToys.Settings.UI.Library
                 {
                     _id = value;
                     OnPropertyChanged();
+                    InvalidateColorPresetCache();
                 }
             }
         }
@@ -333,6 +335,22 @@ namespace Microsoft.PowerToys.Settings.UI.Library
         }
 
         /// <summary>
+        /// Gets or sets values the user has disabled for this monitor. Replace the list
+        /// when editing restrictions so dependent controls receive property notifications.
+        /// </summary>
+        [JsonPropertyName("disabledVcpValues")]
+        public List<VcpValueBlock> DisabledVcpValues
+        {
+            get => _disabledVcpValues;
+            set
+            {
+                _disabledVcpValues = value ?? new List<VcpValueBlock>();
+                OnPropertyChanged();
+                InvalidateColorPresetCache();
+            }
+        }
+
+        /// <summary>
         /// Gets or sets the UTC timestamp of the last time PowerDisplay successfully
         /// discovered this monitor. Used to age out entries for monitors that have
         /// been disconnected for longer than <see cref="PowerDisplaySettings.MonitorEntryRetentionDays"/>.
@@ -389,7 +407,7 @@ namespace Microsoft.PowerToys.Settings.UI.Library
 
         /// <summary>
         /// Compare two VcpCodesFormatted lists for equality by content.
-        /// Returns true if both lists have the same VCP codes (by code value).
+        /// Returns true if both lists have the same codes, values, and display names.
         /// </summary>
         private static bool AreVcpCodesEqual(List<VcpCodeDisplayInfo> list1, List<VcpCodeDisplayInfo> list2)
         {
@@ -411,17 +429,30 @@ namespace Microsoft.PowerToys.Settings.UI.Library
             // Compare by code values - order matters for our use case
             for (int i = 0; i < list1.Count; i++)
             {
-                if (list1[i].Code != list2[i].Code)
+                if (list1[i].Code != list2[i].Code
+                    || list1[i].Title != list2[i].Title
+                    || list1[i].Values != list2[i].Values
+                    || list1[i].HasValues != list2[i].HasValues)
                 {
                     return false;
                 }
 
-                // Also compare ValueList count to detect preset changes
+                // Compare values as well as their count; capability refreshes and custom
+                // names can change the available options without changing the list size.
                 var values1 = list1[i].ValueList;
                 var values2 = list2[i].ValueList;
                 if ((values1?.Count ?? 0) != (values2?.Count ?? 0))
                 {
                     return false;
+                }
+
+                for (int valueIndex = 0; valueIndex < (values1?.Count ?? 0); valueIndex++)
+                {
+                    if (values1[valueIndex].Value != values2[valueIndex].Value
+                        || values1[valueIndex].Name != values2[valueIndex].Name)
+                    {
+                        return false;
+                    }
                 }
             }
 
@@ -575,7 +606,7 @@ namespace Microsoft.PowerToys.Settings.UI.Library
                     bool parsed = int.TryParse(cleanHex, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out int vcpValue);
                     return (VcpValue: parsed ? vcpValue : 0, Name: valueInfo.Name);
                 })
-                .Where(x => x.VcpValue > 0);
+                .Where(x => x.VcpValue > 0 && !VcpValueRestrictions.IsBlocked(Id, VcpCodeSelectColorPreset, x.VcpValue, DisabledVcpValues));
 
             // Compute presets inline (avoiding dependency on PowerDisplay.Lib's ColorTemperatureHelper)
             var presetList = colorTempValues
@@ -610,9 +641,9 @@ namespace Microsoft.PowerToys.Settings.UI.Library
                 // Check if current value is in the preset list
                 var currentValueInList = presets.Any(p => p.VcpValue == _colorTemperatureVcp);
 
-                if (currentValueInList)
+                if (currentValueInList || VcpValueRestrictions.IsBlocked(Id, VcpCodeSelectColorPreset, _colorTemperatureVcp, DisabledVcpValues))
                 {
-                    // Current value is in the list, return as-is
+                    // A blocked current value must not be reintroduced as a selectable custom preset.
                     _colorPresetsForDisplayCache = presets;
                 }
                 else
@@ -747,6 +778,10 @@ namespace Microsoft.PowerToys.Settings.UI.Library
             EnableRotation = other.EnableRotation;
             EnableColorTemperature = other.EnableColorTemperature;
             EnablePowerState = other.EnablePowerState;
+            DisabledVcpValues = other.DisabledVcpValues
+                .Where(block => block != null)
+                .Select(block => new VcpValueBlock { VcpCode = block.VcpCode, Values = new List<int>(block.Values) })
+                .ToList();
             CapabilitiesRaw = other.CapabilitiesRaw;
             VcpCodesFormatted = other.VcpCodesFormatted;
             SupportsBrightness = other.SupportsBrightness;
