@@ -1,0 +1,81 @@
+name: Build portable Awake flyout
+
+on:
+  push:
+    branches:
+      - niels9001/awake-flyout
+    paths:
+      - '.github/workflows/build-awake-portable.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-awake:
+    runs-on: windows-2025
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Show build environment
+        shell: pwsh
+        run: |
+          dotnet --info
+          & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+
+      - name: Build Awake
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\src\modules\awake\scripts\Build-Awake.ps1 -Configuration Release -Platform x64 -Restore
+
+      - name: Collect portable files
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $exe = Get-ChildItem -Path . -Filter 'PowerToys.Awake.exe' -File -Recurse |
+            Where-Object { $_.FullName -match '[\\/]WinUI3Apps[\\/]' } |
+            Select-Object -First 1
+
+          if (-not $exe) {
+            Write-Host 'Could not find the WinUI 3 Awake executable. Candidates:'
+            Get-ChildItem -Path . -Filter 'PowerToys.Awake.exe' -File -Recurse | ForEach-Object FullName
+            throw 'PowerToys.Awake.exe was not found in a WinUI3Apps output directory.'
+          }
+
+          $source = $exe.Directory.FullName
+          $portable = Join-Path $PWD 'Awake-Flyout-x64-portable'
+          New-Item -ItemType Directory -Path $portable -Force | Out-Null
+
+          # The Awake project is self-contained. Copy its complete clean output directory
+          # so WinUI 3, Windows App SDK, .NET, PRI resources, and native DLLs stay together.
+          Copy-Item -Path (Join-Path $source '*') -Destination $portable -Recurse -Force
+
+          $zip = Join-Path $PWD 'Awake-Flyout-x64-portable.zip'
+          Compress-Archive -Path (Join-Path $portable '*') -DestinationPath $zip -CompressionLevel Optimal -Force
+
+          Write-Host "Awake executable: $($exe.FullName)"
+          Write-Host "Portable folder: $portable"
+          Write-Host "Archive: $zip"
+          Get-ChildItem $portable | Sort-Object Name | Format-Table Name, Length
+
+      - name: Upload portable Awake
+        uses: actions/upload-artifact@v4
+        with:
+          name: Awake-Flyout-x64-portable
+          path: Awake-Flyout-x64-portable.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
