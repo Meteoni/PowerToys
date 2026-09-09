@@ -38,7 +38,21 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          & .\src\modules\awake\scripts\Build-Awake.ps1 -Configuration Release -Platform x64 -Restore
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+          if (-not $vs) { throw 'Visual Studio/MSBuild installation was not found.' }
+          $msbuild = Join-Path $vs 'MSBuild\Current\Bin\MSBuild.exe'
+          if (-not (Test-Path $msbuild)) { throw "MSBuild not found at $msbuild" }
+
+          & $msbuild '.\src\modules\awake\Awake\Awake.csproj' `
+            '/restore' `
+            '/p:Configuration=Release' `
+            '/p:Platform=x64' `
+            '/m' `
+            '/nologo' `
+            '/v:normal'
+
+          if ($LASTEXITCODE -ne 0) { throw "MSBuild failed with exit code $LASTEXITCODE" }
 
       - name: Collect portable files
         shell: pwsh
@@ -59,8 +73,8 @@ jobs:
           $portable = Join-Path $PWD 'Awake-Flyout-x64-portable'
           New-Item -ItemType Directory -Path $portable -Force | Out-Null
 
-          # The Awake project is self-contained. Copy its complete clean output directory
-          # so WinUI 3, Windows App SDK, .NET, PRI resources, and native DLLs stay together.
+          # Copy the complete WinUI3Apps output so all self-contained runtime,
+          # Windows App SDK, PRI resource, and native dependencies stay together.
           Copy-Item -Path (Join-Path $source '*') -Destination $portable -Recurse -Force
 
           $zip = Join-Path $PWD 'Awake-Flyout-x64-portable.zip'
