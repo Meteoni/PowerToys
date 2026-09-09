@@ -44,9 +44,19 @@ jobs:
             -ConfigFile '.\nuget.config' `
             -NonInteractive
 
+          nuget install Microsoft.Windows.ImplementationLibrary `
+            -Version 1.0.260126.7 `
+            -OutputDirectory '.\packages' `
+            -ConfigFile '.\nuget.config' `
+            -NonInteractive
+
           $cppWinRTProps = '.\packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.props'
+          $wilTargets = '.\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets'
           if (-not (Test-Path $cppWinRTProps)) {
             throw "Native C++/WinRT package restore did not create $cppWinRTProps"
+          }
+          if (-not (Test-Path $wilTargets)) {
+            throw "Windows Implementation Library restore did not create $wilTargets"
           }
 
       - name: Build Awake
