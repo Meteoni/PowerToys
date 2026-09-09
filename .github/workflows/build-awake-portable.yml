@@ -34,6 +34,21 @@ jobs:
           dotnet --info
           & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
 
+      - name: Restore native NuGet packages
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          nuget install Microsoft.Windows.CppWinRT `
+            -Version 2.0.250303.1 `
+            -OutputDirectory '.\packages' `
+            -ConfigFile '.\nuget.config' `
+            -NonInteractive
+
+          $cppWinRTProps = '.\packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.props'
+          if (-not (Test-Path $cppWinRTProps)) {
+            throw "Native C++/WinRT package restore did not create $cppWinRTProps"
+          }
+
       - name: Build Awake
         shell: pwsh
         run: |
